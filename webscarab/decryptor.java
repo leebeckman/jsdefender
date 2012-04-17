@@ -35,7 +35,8 @@ static Response response;
 static HashMap safeSitesMap = new HashMap();
 static HashMap decryptionKeyMap = new HashMap();
 static final int CHUNKSIZE = 128;
-static final String JSDELIMITER = "538W";
+static final String JSSTARTDELIMITER = "<!--538w";
+static final String JSENDDELIMITER = "/538w-->";
 
 public Response fetchResponse(HTTPClient nextPlugin, Request request)
 		throws IOException {
@@ -45,7 +46,10 @@ public Response fetchResponse(HTTPClient nextPlugin, Request request)
 	
 	// Don't mess with image data
 	String contentType = response.getHeader("Content-Type");
-	if (contentType.startsWith("image"))
+    if (contentType == null) {
+        System.out.println("=============null ContentType");
+    }
+	else if (contentType.startsWith("image"))
 		return response;
 	
 	// Get necessary req/resp details
@@ -66,9 +70,8 @@ public Response fetchResponse(HTTPClient nextPlugin, Request request)
 	
 	// If not refered or refered and safe,
 		// get the decryption key for the resource and the next chain of safe sites
-	
-	String decryptionKey = fetchResource(destination.getHost(), "/jsdefender_publickey.der");
-	String safeSites = fetchResource(destination.getHost(), "/jsdefender_safesites");
+	String decryptionKey = fetchResource(destination.getHost(), "/publickey/encoded_publickey.key");
+	String safeSites = fetchResource(destination.getHost(), "/whitelist");
 	
 	// If there is no decryption key, the resource is not protected so just return it
 	if (decryptionKey == null)
@@ -78,9 +81,9 @@ public Response fetchResponse(HTTPClient nextPlugin, Request request)
 	safeSitesMap.put(destination.getHost(), parseSafeSites(safeSites));
 	
 	// Modify the Content (perform decryption)
-	
-	String modContent = decryptTaggedResource(content);
-	
+
+	String modContent = decryptTaggedResource(content, decryptionKey);
+
 	// Return the modified content
 	
 	byte[] byteContent = modContent.getBytes();
@@ -93,13 +96,16 @@ private ArrayList parseSafeSites(String safeSitesString) {
 	return safeSites;
 }
 
-private static String decryptTaggedResource(String resource) {
-	Pattern matchEncrypted = Pattern.compile("(?m)(<" + JSDELIMITER + ">" + ".*?" + "</" + JSDELIMITER + ">)");
+private static String decryptTaggedResource(String resource, String decryptionKey) {
+	BASE64Decoder decoder = new BASE64Decoder();
+    byte[] decodedKey = decoder.decodeBuffer(decryptionKey);
+	Pattern matchEncrypted = Pattern.compile("(?m)(" + JSSTARTDELIMITER + ".*?" + JSENDDELIMITER + ")");
 	String output = resource;
 	Matcher matcher = matchEncrypted.matcher(output);
 	while (matcher.find()) {
 		String encrypted = matcher.group(0);
-		output = output.replace("encrypted", decryptData(encrypted, "/home/lee/538w/publickey.der", CHUNKSIZE));
+		output = output.replace(encrypted, decryptData(encrypted, decodedKey, CHUNKSIZE));
+		//output = output.replace(encrypted, "");
 		matcher = matchEncrypted.matcher(output);
 	}
 	
@@ -117,11 +123,11 @@ private static String fetchResource(String host, String path) {
 		ResponseHandler responseHandler = new BasicResponseHandler();
 		resource = (String)httpClient.execute(resourceGet, responseHandler);
 	} catch (URISyntaxException e) {
-		e.printStackTrace();
+		//e.printStackTrace();
 	} catch (ClientProtocolException e) {
-		e.printStackTrace();
+		//e.printStackTrace();
 	} catch (IOException e) {
-		e.printStackTrace();
+		//e.printStackTrace();
 	} finally {
 		httpClient.getConnectionManager().shutdown();
 	}
@@ -129,24 +135,17 @@ private static String fetchResource(String host, String path) {
 	return resource;
 }
 
-private static String decryptData(String encrypted, String keyPath, int chunkSize) {
+private static String decryptData(String encrypted, byte[] derKey, int chunkSize) {
 	BASE64Decoder decoder = new BASE64Decoder();
-	if (encrypted.startsWith("<" + JSDELIMITER + ">"))
-		encrypted = encrypted.replaceFirst("<" + JSDELIMITER + ">", "");
+	if (encrypted.startsWith(JSSTARTDELIMITER))
+		encrypted = encrypted.replaceFirst(JSSTARTDELIMITER, "");
 
-	if (encrypted.endsWith("</" + JSDELIMITER + ">"))
-		encrypted = encrypted.replace("</" + JSDELIMITER + ">", "");
+	if (encrypted.endsWith(JSENDDELIMITER))
+		encrypted = encrypted.replace(JSENDDELIMITER, "");
 	
 	PublicKey publicKey = null;
 	try {
-		File pubkeyFile = new File(keyPath);
-		FileInputStream fis = new FileInputStream(pubkeyFile);
-	    DataInputStream dis = new DataInputStream(fis);
-	    byte[] keyBytes = new byte[(int)pubkeyFile.length()];
-	    dis.readFully(keyBytes);
-	    dis.close();
-	    
-	    X509EncodedKeySpec keySpec = new X509EncodedKeySpec(keyBytes);
+	    X509EncodedKeySpec keySpec = new X509EncodedKeySpec(derKey);
 	    KeyFactory kf = KeyFactory.getInstance("RSA");
 	    
 	    publicKey = kf.generatePublic(keySpec);
