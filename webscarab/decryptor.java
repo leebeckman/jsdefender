@@ -49,11 +49,14 @@ public Response fetchResponse(HTTPClient nextPlugin, Request request)
     if (contentType == null) {
         System.out.println("=============null ContentType");
     }
-	else if (contentType.startsWith("image"))
+	else if (contentType.startsWith("image") || contentType.startsWith("text/css"))
 		return response;
 	
 	// Get necessary req/resp details
 	String referer = request.getHeader("referer");
+    if (referer != null) {
+		referer = new HttpUrl(referer).getHost();
+	}
 	HttpUrl destination = request.getURL();
 	String content = new String(response.getContent());
 	
@@ -92,8 +95,12 @@ public Response fetchResponse(HTTPClient nextPlugin, Request request)
 }
 
 private ArrayList parseSafeSites(String safeSitesString) {
-	ArrayList safeSites = new ArrayList(Arrays.asList(safeSitesString.split(",")));
-	return safeSites;
+    if (safeSitesString != null) {
+    	ArrayList safeSites = new ArrayList(Arrays.asList(safeSitesString.split(",")));
+    	return safeSites;
+    }
+    else
+        return null;
 }
 
 private static String decryptTaggedResource(String resource, String decryptionKey) {
